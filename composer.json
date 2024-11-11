@@ -1,0 +1,25 @@
+{
+  "name": "joytekmotion/paystack",
+  "type": "tastyigniter-extension",
+  "description": "This extension allows you to accept payments using the Paystack Payment Gateway.",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Joytek Motion"
+    }
+  ],
+  "extra": {
+    "tastyigniter-extension": {
+      "code": "joytekmotion.paystack",
+      "name": "Paystack Payment Gateway",
+      "icon": {
+        "class": "fas fa-credit-card",
+        "backgroundColor": "#0C4DA2",
+        "color": "#FFF"
+      }
+    }
+  },
+  "require": {
+    "unicodeveloper/laravel-paystack": "1.0.*"
+  }
+}
