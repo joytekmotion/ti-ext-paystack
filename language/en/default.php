@@ -1,22 +1,23 @@
 <?php
 
 return [
-    'text_payment_title' => 'Paystack Payments',
+    'text_payment_title' => 'Paystack',
     'text_payment_desc' => 'Accept payments using Paystack',
 
     'label_title' => 'Title',
     'label_description' => 'Description',
     'label_transaction_mode' => 'Transaction Mode',
     'label_transaction_type' => 'Transaction Type',
-    'label_test_client_id' => 'Test Client ID',
-    'label_test_client_secret' => 'Test Client Secret',
-    'label_test_terminal_id' => 'Test Terminal ID',
-    'label_live_client_id' => 'Live Client ID',
-    'label_live_client_secret' => 'Live Client Secret',
-    'label_live_terminal_id' => 'Live Terminal ID',
+    'label_integration_type' => 'Integration Type',
+    'label_test_secret_key' => 'Test Secret Key',
+    'label_live_secret_key' => 'Live Secret Key',
+    'label_test_public_key' => 'Test Public Key',
+    'label_live_public_key' => 'Live Public Key',
 
     'text_live' => 'Live',
     'text_test' => 'Test',
+    'text_popup' => 'Popup',
+    'text_redirect' => 'Redirect',
     'text_auth_only' => 'Authorization Only',
     'text_auth_settlement' => 'Authorization & Settlement',
     'text_delete' => 'Delete',

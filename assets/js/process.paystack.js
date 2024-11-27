@@ -1,92 +1,108 @@
 +(function ($) {
     "use strict";
 
-    const ProcessDnaPayments = function (element, options) {
+    const ProcessPaystack = function (element, options) {
         this.$el = $(element);
         this.options = options || {};
-
-        this.paymentInputSelector = 'input[name=paystack]'
+        this.$checkoutForm = this.$el.closest("#checkout-form");
 
         this.init();
     };
 
-    ProcessDnaPayments.prototype.init = function () {
-        // find delete button with id delete-payment-profile
-        this.$el.find('.delete-payment-profile-btn').on('click', this.deletePaymentProfile);
+    ProcessPaystack.prototype.init = function () {
+        this.$checkoutForm.on("submitCheckoutForm", this.processPayment.bind(this));
     };
 
-    ProcessDnaPayments.prototype.deletePaymentProfile = function (e) {
+    ProcessPaystack.prototype.processPayment = function (e) {
         e.preventDefault();
-
-        const $this = $(this);
-        const paymentProfileId = $this.data("payment-profile-id");
-        const customerId = $this.data("customer-id");
-
-        if (!paymentProfileId) {
-            return;
+        const self = this;
+        if (!self.options.orderCreated) {
+            self.$checkoutForm.request(self.$checkoutForm.data('handler'))
+                .done(() => {
+                    self.handlePayment();
+                });
+        } else {
+            self.handlePayment();
         }
-        $(".checkout-btn").prop("disabled", true);
+    };
+
+    ProcessPaystack.prototype.handlePayment = function () {
+        const self = this;
         $.ajax({
             headers: {
                 "X-CSRF-TOKEN": $('meta[name="csrf-token"]').attr("content"),
             },
-            url: "/ti_payregister/dnapayments_delete_payment_profile/" + paymentProfileId,
+            url: "/ti_payregister/paystack_initialize_transaction/handle",
             method: "POST",
-            success: function (data) {
-                if ($.trim(data)) {
-                    // delete payment profile div when it is the last one
-                    if ($this.closest('.payment-profile-item').siblings().length <= 1) {
-                        $this.closest('.payment-profile-item').closest('.payment-form').remove();
-                    } else {
-                        $this.closest('.payment-profile-item').slideUp(500, function () {
-                            $(this).remove();
-                        });
+            success: function (authData) {
+                const popup = new PaystackPop();
+                popup.resumeTransaction(authData.access_code, {
+                    onCancel: function() {
+                        window.location.reload();
+                    },
+                    onSuccess: function(transaction) {
+                        self.paymentSuccess(authData.order_hash, transaction);
+                    },
+                    onError: function (error) {
+                        console.error('An error occurred: ', error);
                     }
-                }
+                });
             },
             error: function (xhr, status, error) {
+                console.error('error', error);
             },
-            complete: function () {
+            completed: function () {
                 $(".checkout-btn").prop("disabled", false);
-            },
+            }
         });
-    };
-
-    ProcessDnaPayments.prototype.triggerPaymentInputChange = function ($el) {
-        const paymentInputSelector = this.paymentInputSelector + '[value=' + $el.data('paymentCode') + ']';
-        setTimeout(function () {
-            $(paymentInputSelector, document).prop('checked', true).trigger('change')
-        }, 1)
     }
 
-    ProcessDnaPayments.DEFAULTS = {};
+    ProcessPaystack.prototype.paymentSuccess = function (orderHash, transaction) {
+        $.ajax({
+            headers: {
+                "X-CSRF-TOKEN": $('meta[name="csrf-token"]').attr("content"),
+            },
+            url: "/ti_payregister/paystack_payment_successful/" + orderHash,
+            method: "POST",
+            data: transaction,
+            success: function() {
+                window.location.reload();
+            },
+            error: function (xhr, status, error) {
+                console.error('error', error);
+                window.location.reload();
+            }
+        });
+    }
+
+    ProcessPaystack.DEFAULTS = {};
 
     // PLUGIN DEFINITION
     // ============================
 
-    var old = $.fn.processDnaPayments;
+    var old = $.fn.processPaystack;
 
-    $.fn.processDnaPayments = function (option) {
+    $.fn.processPaystack = function (option) {
         var $this = $(this).first();
         var options = $.extend(
             true,
             {},
-            ProcessDnaPayments.DEFAULTS,
+            ProcessPaystack.DEFAULTS,
             $this.data(),
             typeof option == "object" && option
         );
 
-        return new ProcessDnaPayments($this, options);
+        return new ProcessPaystack($this, options);
     };
 
-    $.fn.processDnaPayments.Constructor = ProcessDnaPayments;
+    $.fn.processPaystack.Constructor = ProcessPaystack;
 
-    $.fn.processDnaPayments.noConflict = function () {
-        $.fn.processDnaPayments = old;
+    $.fn.processPaystack.noConflict = function () {
+        $.fn.processPaystack = old;
         return this;
     };
 
     $(document).render(function () {
-        $("#dnapaymentsForm").processDnaPayments();
+        $("#paystackForm").processPaystack();
     });
 })(window.jQuery);

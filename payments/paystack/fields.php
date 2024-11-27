@@ -3,27 +3,27 @@
 return [
     'fields' => [
         'transaction_mode' => [
-            'label' => 'lang:foodninjas.paystack::default.label_transaction_mode',
+            'label' => 'lang:joytekmotion.paystack::default.label_transaction_mode',
             'type' => 'radiotoggle',
             'default' => 'test',
             'span' => 'left',
             'options' => [
-                'live' => 'lang:foodninjas.paystack::default.text_live',
-                'test' => 'lang:foodninjas.paystack::default.text_test',
+                'live' => 'lang:joytekmotion.paystack::default.text_live',
+                'test' => 'lang:joytekmotion.paystack::default.text_test',
             ],
         ],
-        'transaction_type' => [
-            'label' => 'lang:foodninjas.paystack::default.label_transaction_type',
+        'integration_type' => [
+            'label' => 'lang:joytekmotion.paystack::default.label_integration_type',
             'type' => 'radiotoggle',
-            'default' => 'SALE',
+            'default' => 'popup',
             'span' => 'right',
             'options' => [
-                'AUTH' => 'lang:foodninjas.paystack::default.text_auth_only',
-                'SALE' => 'lang:foodninjas.paystack::default.text_auth_settlement',
+                'popup' => 'lang:joytekmotion.paystack::default.text_popup',
+                'redirect' => 'lang:joytekmotion.paystack::default.text_redirect',
             ],
         ],
-        'test_client_id' => [
-            'label' => 'lang:foodninjas.paystack::default.label_test_client_id',
+        'test_public_key' => [
+            'label' => 'lang:joytekmotion.paystack::default.label_test_public_key',
             'type' => 'text',
             'span' => 'left',
             'trigger' => [
@@ -32,8 +32,8 @@ return [
                 'condition' => 'value[test]',
             ],
         ],
-        'test_client_secret' => [
-            'label' => 'lang:foodninjas.paystack::default.label_test_client_secret',
+        'test_secret_key' => [
+            'label' => 'lang:joytekmotion.paystack::default.label_test_secret_key',
             'type' => 'text',
             'span' => 'right',
             'trigger' => [
@@ -42,18 +42,8 @@ return [
                 'condition' => 'value[test]',
             ],
         ],
-        'test_terminal_id' => [
-            'label' => 'lang:foodninjas.paystack::default.label_test_terminal_id',
-            'type' => 'text',
-            'span' => 'left',
-            'trigger' => [
-                'action' => 'show',
-                'field' => 'transaction_mode',
-                'condition' => 'value[test]',
-            ],
-        ],
-        'live_client_id' => [
-            'label' => 'lang:foodninjas.paystack::default.label_live_client_id',
+        'live_public_key' => [
+            'label' => 'lang:joytekmotion.paystack::default.label_live_public_key',
             'type' => 'text',
             'span' => 'left',
             'trigger' => [
@@ -62,20 +52,10 @@ return [
                 'condition' => 'value[live]',
             ],
         ],
-        'live_client_secret' => [
-            'label' => 'lang:foodninjas.paystack::default.label_live_client_secret',
+        'live_secret_key' => [
+            'label' => 'lang:joytekmotion.paystack::default.label_live_secret_key',
             'type' => 'text',
             'span' => 'right',
-            'trigger' => [
-                'action' => 'show',
-                'field' => 'transaction_mode',
-                'condition' => 'value[live]',
-            ],
-        ],
-        'live_terminal_id' => [
-            'label' => 'lang:foodninjas.paystack::default.label_live_terminal_id',
-            'type' => 'text',
-            'span' => 'left',
             'trigger' => [
                 'action' => 'show',
                 'field' => 'transaction_mode',
@@ -116,13 +96,12 @@ return [
         ],
     ],
     'rules' => [
-        ['transaction_mode', 'lang:foodninjas.paystack::default.label_transaction_mode', 'string'],
-        ['live_client_id', 'lang:foodninjas.paystack::default.label_live_client_id', 'string'],
-        ['live_client_secret', 'lang:foodninjas.paystack::default.label_live_client_secret', 'string'],
-        ['live_terminal_id', 'lang:foodninjas.paystack::default.label_live_terminal_id', 'string'],
-        ['test_client_id', 'lang:foodninjas.paystack::default.label_test_client_id', 'string'],
-        ['test_client_secret', 'lang:foodninjas.paystack::default.label_test_client_secret', 'string'],
-        ['test_terminal_id', 'lang:foodninjas.paystack::default.label_test_terminal_id', 'string'],
+        ['transaction_mode', 'lang:joytekmotion.paystack::default.label_transaction_mode', 'string'],
+        ['integration_type', 'lang:joytekmotion.paystack::default.label_integration_type', 'string'],
+        ['live_public_key', 'lang:joytekmotion.paystack::default.label_live_public_key', 'string'],
+        ['live_secret_key', 'lang:joytekmotion.paystack::default.label_live_secret_key', 'string'],
+        ['test_public_key', 'lang:joytekmotion.paystack::default.label_test_public_key', 'string'],
+        ['test_secret_key', 'lang:joytekmotion.paystack::default.label_test_secret_key', 'string'],
         ['order_fee_type', 'lang:igniter.payregister::default.label_order_fee_type', 'integer'],
         ['order_fee', 'lang:igniter.payregister::default.label_order_fee', 'numeric'],
         ['order_total', 'lang:igniter.payregister::default.label_order_total', 'numeric'],

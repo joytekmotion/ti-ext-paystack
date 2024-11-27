@@ -2,7 +2,10 @@
 namespace Joytekmotion\Paystack\Payments;
 
 use Admin\Classes\BasePaymentGateway;
+use Igniter\Cart\Classes\OrderManager;
+use Igniter\Flame\Exception\ApplicationException;
 use Igniter\PayRegister\Traits\PaymentHelpers;
+use Joytekmotion\Paystack\Classes\PaystackApi;
 
 class Paystack extends BasePaymentGateway {
     use PaymentHelpers;
@@ -10,6 +13,10 @@ class Paystack extends BasePaymentGateway {
     public function registerEntryPoints()
     {
         return [
+            'paystack_initialize_transaction' => 'initializeTransaction',
+            'paystack_process_transaction' => 'processTransaction',
+            'paystack_payment_successful' => 'paymentSuccessful',
+            'paystack_webhook' => 'processWebhookUrl'
         ];
     }
 
@@ -20,60 +27,102 @@ class Paystack extends BasePaymentGateway {
 
     public function beforeRenderPaymentForm($host, $controller)
     {
+        $controller->addJs('https://js.paystack.co/v2/inline.js', 'paystack-inline-js');
         $controller->addJs('$/joytekmotion/paystack/assets/js/process.paystack.js', 'process-paystack-js');
     }
 
-    public function processPaymentForm($data, $host, $order) {
-        $this->validatePaymentMethod($order, $host);
+    public function initializeTransaction() {
+        $order = OrderManager::instance()->getOrder();
         try {
-            if ($order->isPaymentProcessed()) {
-                return true;
-            }
-            $auth = $this->getAuth($order);
-            $redirectUrl = $this->createGateway()
-                ->generateUrl([
-                    'invoiceId' => $order->order_id,
-                    'amount' => $order->order_total,
-                    'backLink' => $this->makeEntryPointUrl('dnapayments_payment_successful').'/'.$order->hash,
-                    'failureBackLink' => $this->makeEntryPointUrl('dnapayments_payment_failed').'/'.$order->hash,
-                    'postLink' => $this->makeEntryPointUrl('dnapayments_process_payment_response').'/'.$order->hash,
-                    'failurePostLink' => $this->makeEntryPointUrl('dnapayments_process_payment_response').'/'.$order->hash,
-                    'language' => $this->model->locale_code ?? app()->getLocale(),
-                    'description' => '',
-                    'accountId' => $order->customer_id,
-                    'phone' => $order->telephone,
-                    'terminal' => $this->getTerminalId(),
-                    'currency' => currency()->getUserCurrency(),
-                    'accountCountry' => $order->address ? $order->address->country->iso_code_2 : null,
-                    'accountCity' => optional($order->address)->city,
-                    'accountStreet1' => optional($order->address)->address_1,
-                    'accountEmail' => $order->email,
-                    'accountFirstName' => $order->first_name,
-                    'accountLastName' => $order->last_name,
-                    'accountPostalCode' => optional($order->address)->postcode,
-                    'transactionType' => $this->getTransactionType(),
-                ], $auth);
-            return Redirect::to($redirectUrl);
+            $response = $this->createGateway()->initializeTransaction([
+                'email' => $order->email,
+                'amount' => $order->order_total * 100,
+                'currency' => currency()->getUserCurrency(),
+                'metadata' => json_encode([
+                    'custom_fields' => [
+                        [
+                            'display_name' => 'Invoice ID',
+                            'variable_name' => 'invoice_id',
+                            'value' => $order->order_id,
+                        ],
+                        [
+                            'display_name' => 'Customer Name',
+                            'variable_name' => 'customer_name',
+                            'value' => $order->first_name .' '. $order->last_name,
+                        ],
+                        [
+                            'display_name' => 'Customer Email',
+                            'variable_name' => 'customer_email',
+                            'value' => $order->email,
+                        ],
+                        [
+                            'display_name' => 'Customer Phone',
+                            'variable_name' => 'customer_phone',
+                            'value' => $order->telephone,
+                        ],
+                        [
+                            'display_name' => 'Order Hash',
+                            'variable_name' => 'order_hash',
+                            'value' => $order->hash,
+                        ]
+                    ]
+                ]),
+            ]);
+            $response['data']['order_hash'] = $order->hash;
+            return $response['data'];
+        } catch (\Exception $ex) {
+            throw new ApplicationException($ex->getMessage());
         }
-        catch (\Exception $ex) {
-            $order->logPaymentAttempt(lang('joytekmotion.paystack::default.alert_payment_error', ['message' => $ex->getMessage()]), 0, [], $data);
-            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_transaction_failed'));
-        };
+    }
+
+    public function processWebhookUrl() {
+        if (post('event') != 'charge.success')
+            return;
+
+        $orderHash = null;
+        foreach(post('data')['metadata']['custom_fields'] as $field) {
+            if ($field['variable_name'] == 'order_hash') {
+                $orderHash = $field['value'];
+                break;
+            }
+        }
+        if (!$orderHash) return;
+
+        $order = $this->createOrderModel()->whereHash($orderHash)->first();
+        if (!$order) return;
+
+        if($order->isPaymentProcessed()) return;
+
+
+
+
     }
 
     public function paymentSuccessful($params) {
+
         $hash = $params[0] ?? null;
         $order = $this->createOrderModel()->whereHash($hash)->first();
         try {
             if (!$order)
                 throw new \Exception(lang('joytekmotion.paystack::default.alert_transaction_failed'));
 
-            if (!$order->isPaymentProcessed())
-                flash()->warning(lang('joytekmotion.paystack::default.alert_payment_processing'))->important()->now();
+            if (!$order->isPaymentProcessed() && (post('status') == 'success')) {
+                $response = $this->createGateway()->verifyTransaction(post('reference'));
+                if (($response['data']['status'] == 'success') &&
+                    ($response['data']['amount'] == $order->order_total * 100)
+                ) {
+                    $order->updateOrderStatus($this->model->order_status, ['notify' => FALSE]);
+                    $order->markAsPaymentProcessed();
+                    $order->logPaymentAttempt(
+                        lang('joytekmotion.paystack::default.alert_payment_successful'),
+                        1, post(), $response, true
+                    );
+                }
+            }
+
         } catch(\Exception $ex) {
             flash()->warning($ex->getMessage())->important()->now();
         }
-        return Redirect::to(page_url('checkout'.DIRECTORY_SEPARATOR.'checkout'));
     }
 
     public function paymentFailed($params) {
@@ -89,16 +138,7 @@ class Paystack extends BasePaymentGateway {
     }
 
     protected function createGateway() {
-        return new \DNAPayments\DNAPayments([
-            'isTestMode' => $this->isTestMode(),
-            'scopes' => [
-                'allowSeamless' => true,
-                'webapi' => true
-            ],
-            'allowSavingCards' => !$this->isPaymentProfileLimitReached(Auth::getUser()),
-            'autoRedirectDelayInMs' => 5000,
-            'cards' => $this->getCards(Auth::getUser()),
-        ]);
+        return new PaystackApi($this->getSecretKey());
     }
 
     protected function isTestMode() {
@@ -121,16 +161,8 @@ class Paystack extends BasePaymentGateway {
         }
     }
 
-    protected function getClientId() {
-        return $this->isTestMode() ? $this->model->test_client_id : $this->model->live_client_id;
-    }
-
-    protected function getClientSecret() {
-        return $this->isTestMode() ? $this->model->test_client_secret : $this->model->live_client_secret;
-    }
-
-    protected function getTerminalId() {
-        return $this->isTestMode() ? $this->model->test_terminal_id : $this->model->live_terminal_id;
+    protected function getSecretKey() {
+        return $this->isTestMode() ? $this->model->test_secret_key : $this->model->live_secret_key;
     }
 
     protected function getTransactionType() {
@@ -174,49 +206,6 @@ class Paystack extends BasePaymentGateway {
             if ($order)
                 $order->logPaymentAttempt($ex->getMessage(), 0, [], post());
         }
-    }
-
-    protected function handleUpdatePaymentProfile($customer, $data)
-    {
-        if (!$this->isPaymentProfileLimitReached($customer)) {
-            if (!$this->cardExists($customer, $data['merchantTokenId'])) {
-                $profile = $this->model->initPaymentProfile($customer);
-                $profile->card_brand = $data['cardSchemeName'];
-                $profile->card_last4 = substr($data['panStar'], -4);
-                $profile->setProfileData($data);
-                $profile->save();
-            }
-        }
-    }
-
-    protected function isPaymentProfileLimitReached($customer)
-    {
-        if (!$customer)
-            return true;
-        return Payment_profiles_model::where('customer_id', $customer->customer_id)
-                ->where('payment_id', $this->model->payment_id)
-                ->count() >= 4;
-    }
-
-    protected function getCards($customer) {
-        if (!$customer)
-            return [];
-        $cards = [];
-        $paymentProfiles = Payment_profiles_model::where('customer_id', $customer->customer_id)
-            ->where('payment_id', $this->model->payment_id)->get();
-
-        foreach ($paymentProfiles as $profile) {
-            $cards[] = [
-                'merchantTokenId' => $profile->profile_data['merchantTokenId'],
-                'cardName' => $profile->profile_data['cardName'],
-                'panStar' => $profile->profile_data['panStar'],
-                'cardSchemeId' => $profile->profile_data['cardSchemeId'],
-                'expiryDate' => $profile->profile_data['expiryDate'],
-                'isCSCRequired' => false,
-                'useStoredBillingData' => true,
-            ];
-        }
-        return $cards;
     }
 
     public function getPaymentProfiles($customer) {
