@@ -1,8 +1,13 @@
 {
   "name": "joytekmotion/paystack",
   "type": "tastyigniter-extension",
-  "description": "This extension allows you to accept payments using Paystack Payment Gateway.",
+  "description": "This extension allows you to accept payments via Paystack.",
   "license": "MIT",
+  "keywords": [
+    "tastyigniter",
+    "paystack",
+    "payment"
+  ],
   "authors": [
     {
       "name": "Joytek Motion"
@@ -11,11 +16,10 @@
   "extra": {
     "tastyigniter-extension": {
       "code": "joytekmotion.paystack",
-      "name": "Paystack Payment Gateway",
+      "name": "Paystack Payment",
       "icon": {
-        "class": "fas fa-credit-card",
-        "backgroundColor": "#09a5db",
-        "color": "#FFF"
+        "image": "icon.svg",
+        "backgroundColor": "#e9f6ff"
       }
     }
   }
