@@ -1,8 +1,8 @@
 ![Sample Screenshot](sample.png)
 # Introduction
 This extension allows you to accept payments via Paystack on your [TastyIgniter website](https://tastyigniter.com). 
-Paystack is a payment gateway that allows you to accept payments from customers in Nigeria and other African countries.
-These countries include Ghana, Kenya, and South Africa.
+Paystack is a payment gateway that allows you to accept payments from customers across the globe in different currencies.
+It is supported in Nigeria and other African countries such as Ghana, Kenya, and South Africa.
 
 # Features
 * Accept payments via different payment methods including card, bank transfer, USSD, and mobile money.
