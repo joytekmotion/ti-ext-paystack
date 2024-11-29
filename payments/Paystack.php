@@ -20,7 +20,6 @@ class Paystack extends BasePaymentGateway {
     {
         return [
             'paystack_initialize_transaction' => 'initializeTransaction',
-            'paystack_process_transaction' => 'processTransaction',
             'paystack_payment_successful' => 'paymentSuccessful',
             'paystack_webhook' => 'processWebhookUrl',
             'paystack_cancel_url' => 'paymentCancelled'
@@ -206,28 +205,25 @@ class Paystack extends BasePaymentGateway {
     }
 
     protected function validateWebhookRequest() {
+        // Paystack valid webhook IP addresses
         $ipWhitelist = ['52.31.139.75', '52.49.173.169', '52.49.173.169'];
 
         if (!in_array(request()->ip(), $ipWhitelist))
-            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_invalid_request', [
-                'message' => 'IP not whitelisted'
-            ]));
+            throw new ApplicationException(
+                lang('joytekmotion.paystack::default.alert_ip_not_whitelisted'));
 
         $requestMethod = request()->getMethod();
         $signature = request()->header('x-paystack-signature');
 
         if (strtoupper($requestMethod) != 'POST' || !$signature)
-            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_invalid_request', [
-                'message' => 'Invalid request method or signature'
-            ]));
+            throw new ApplicationException(
+                lang('joytekmotion.paystack::default.alert_invalid_request_method_signature'));
 
         $input = request()->getContent();
         $secretKey = $this->getSecretKey();
 
         if($signature !== hash_hmac('sha512', $input, $secretKey))
-            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_invalid_request', [
-                'message' => 'Invalid signature'
-            ]));
+            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_invalid_signature'));
     }
 
     public function paymentSuccessful() {
@@ -298,15 +294,6 @@ class Paystack extends BasePaymentGateway {
 
         $profile->card_brand = strtolower(array_get($profileData, 'card_type'));
         $profile->card_last4 = array_get($profileData, 'last4');
-        $profile->setProfileData($profileData);
-
-        return $profile;
-    }
-
-    protected function updatePaymentProfileData($profile, $profileData = [], $cardData = [])
-    {
-        $profile->card_brand = strtolower(array_get($cardData, 'card.brand'));
-        $profile->card_last4 = array_get($cardData, 'card.last4');
         $profile->setProfileData($profileData);
 
         return $profile;

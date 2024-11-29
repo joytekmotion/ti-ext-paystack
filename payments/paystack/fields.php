@@ -2,6 +2,10 @@
 
 return [
     'fields' => [
+        'setup' => [
+            'type' => 'partial',
+            'path' => '$/joytekmotion/paystack/payments/paystack/info',
+        ],
         'transaction_mode' => [
             'label' => 'lang:joytekmotion.paystack::default.label_transaction_mode',
             'type' => 'radiotoggle',
@@ -22,16 +26,6 @@ return [
                 'redirect' => 'lang:joytekmotion.paystack::default.text_redirect',
             ],
         ],
-        'test_public_key' => [
-            'label' => 'lang:joytekmotion.paystack::default.label_test_public_key',
-            'type' => 'text',
-            'span' => 'left',
-            'trigger' => [
-                'action' => 'show',
-                'field' => 'transaction_mode',
-                'condition' => 'value[test]',
-            ],
-        ],
         'test_secret_key' => [
             'label' => 'lang:joytekmotion.paystack::default.label_test_secret_key',
             'type' => 'text',
@@ -40,16 +34,6 @@ return [
                 'action' => 'show',
                 'field' => 'transaction_mode',
                 'condition' => 'value[test]',
-            ],
-        ],
-        'live_public_key' => [
-            'label' => 'lang:joytekmotion.paystack::default.label_live_public_key',
-            'type' => 'text',
-            'span' => 'left',
-            'trigger' => [
-                'action' => 'show',
-                'field' => 'transaction_mode',
-                'condition' => 'value[live]',
             ],
         ],
         'live_secret_key' => [
@@ -98,9 +82,7 @@ return [
     'rules' => [
         ['transaction_mode', 'lang:joytekmotion.paystack::default.label_transaction_mode', 'string'],
         ['integration_type', 'lang:joytekmotion.paystack::default.label_integration_type', 'string'],
-        ['live_public_key', 'lang:joytekmotion.paystack::default.label_live_public_key', 'string'],
         ['live_secret_key', 'lang:joytekmotion.paystack::default.label_live_secret_key', 'string'],
-        ['test_public_key', 'lang:joytekmotion.paystack::default.label_test_public_key', 'string'],
         ['test_secret_key', 'lang:joytekmotion.paystack::default.label_test_secret_key', 'string'],
         ['order_fee_type', 'lang:igniter.payregister::default.label_order_fee_type', 'integer'],
         ['order_fee', 'lang:igniter.payregister::default.label_order_fee', 'numeric'],

@@ -11,8 +11,6 @@ return [
     'label_integration_type' => 'Integration Type',
     'label_test_secret_key' => 'Test Secret Key',
     'label_live_secret_key' => 'Live Secret Key',
-    'label_test_public_key' => 'Test Public Key',
-    'label_live_public_key' => 'Live Public Key',
 
     'text_live' => 'Live',
     'text_test' => 'Test',
@@ -32,5 +30,7 @@ return [
     'alert_order_hash_mismatch' => 'Order hash mismatch.',
     'alert_amount_mismatch' => 'Amount mismatch.',
     'alert_refund_amount_should_be_less' => 'Refund amount should be less than total',
-    'alert_invalid_request' => 'Invalid request: :message',
+    'alert_ip_not_whitelisted' => 'Invalid request: IP not whitelisted',
+    'alert_invalid_request_method_signature' => 'Invalid request: Invalid request method or signature',
+    'alert_invalid_signature' => 'Invalid request: Invalid signature',
 ];

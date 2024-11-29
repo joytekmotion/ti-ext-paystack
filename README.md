@@ -18,7 +18,7 @@ The Pay Register extension has to be installed and activated on your site before
 # Usage
 Just like pay register, this extension is easy to set up and use. Here's how to get started:
 1. Install and activate the extension.
-2. Go to the Payments page and edit the Paystack payment method.
+2. Go to the Sales > Payments page and edit the Paystack payment method.
 3. Fill in your Paystack API keys and other settings as required.
 4. Enable the payment method and save your changes.
 

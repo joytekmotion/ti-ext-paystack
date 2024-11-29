@@ -2,8 +2,8 @@
      data-order-created="{{ (bool)$order->order_id }}"
      data-integration-type="{{ $paymentMethod->getIntegrationType() }}"
 >
-    <div class="form-group">
-        @if ($paymentProfile = $paymentMethod->findPaymentProfile($order->customer))
+    @if ($paymentProfile = $paymentMethod->findPaymentProfile($order->customer))
+        <div class="form-group">
             <div>
                 <div class="form-check">
                     <input type="radio" class="form-check-input" id="savedCard" name="pay_from_profile" value="1" checked>
@@ -34,8 +34,10 @@
                     </label>
                 </div>
             </div>
-        @else
-            @if ($paymentMethod->supportsPaymentProfiles() && $order->customer)
+        </div>
+    @else
+        @if ($paymentMethod->supportsPaymentProfiles() && $order->customer)
+            <div class="form-group">
                 <div class="form-check mt-2">
                     <input
                         id="save-customer-profile"
@@ -49,7 +51,7 @@
                         for="save-customer-profile"
                     >@lang('igniter.payregister::default.text_save_card_profile')</label>
                 </div>
-            @endif
+            </div>
         @endif
-    </div>
+    @endif
 </div>

@@ -1,5 +1,5 @@
 {
-  "name": "joytekmotion/paystack",
+  "name": "joytekmotion/ti-ext-paystack",
   "type": "tastyigniter-extension",
   "description": "This extension allows you to accept payments via Paystack.",
   "license": "MIT",
@@ -10,7 +10,7 @@
   ],
   "authors": [
     {
-      "name": "Joytek Motion"
+      "name": "Obinna Elvis Okechukwu"
     }
   ],
   "extra": {
