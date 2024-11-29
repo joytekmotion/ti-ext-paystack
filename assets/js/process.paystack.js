@@ -14,6 +14,11 @@
     };
 
     ProcessPaystack.prototype.processPayment = function (e) {
+        const payFromProfile = this.$checkoutForm.find('input[name="pay_from_profile"]:checked').val();
+        if(payFromProfile > 0) return;
+
+        if(this.options.integrationType === 'redirect') return;
+
         e.preventDefault();
         const self = this;
         if (!self.options.orderCreated) {
@@ -28,11 +33,17 @@
 
     ProcessPaystack.prototype.handlePayment = function () {
         const self = this;
+        const createPaymentProfile =
+            self.$checkoutForm.find('input[name="create_payment_profile"]').is(':checked') ? 1 : 0;
+
         $.ajax({
             headers: {
                 "X-CSRF-TOKEN": $('meta[name="csrf-token"]').attr("content"),
             },
             url: "/ti_payregister/paystack_initialize_transaction/handle",
+            data: {
+                'create_payment_profile': createPaymentProfile,
+            },
             method: "POST",
             success: function (authData) {
                 const popup = new PaystackPop();
@@ -41,7 +52,7 @@
                         window.location.reload();
                     },
                     onSuccess: function(transaction) {
-                        self.paymentSuccess(authData.order_hash, transaction);
+                        self.paymentSuccess(transaction);
                     },
                     onError: function (error) {
                         console.error('An error occurred: ', error);
@@ -50,26 +61,20 @@
             },
             error: function (xhr, status, error) {
                 console.error('error', error);
-            },
-            completed: function () {
                 $(".checkout-btn").prop("disabled", false);
             }
         });
     }
 
-    ProcessPaystack.prototype.paymentSuccess = function (orderHash, transaction) {
+    ProcessPaystack.prototype.paymentSuccess = function (transaction) {
         $.ajax({
             headers: {
                 "X-CSRF-TOKEN": $('meta[name="csrf-token"]').attr("content"),
             },
-            url: "/ti_payregister/paystack_payment_successful/" + orderHash,
+            url: "/ti_payregister/paystack_payment_successful/handle",
             method: "POST",
             data: transaction,
-            success: function() {
-                window.location.reload();
-            },
-            error: function (xhr, status, error) {
-                console.error('error', error);
+            complete: function() {
                 window.location.reload();
             }
         });

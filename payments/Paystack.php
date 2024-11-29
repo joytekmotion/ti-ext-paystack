@@ -4,11 +4,17 @@ namespace Joytekmotion\Paystack\Payments;
 use Admin\Classes\BasePaymentGateway;
 use Igniter\Cart\Classes\OrderManager;
 use Igniter\Flame\Exception\ApplicationException;
+use Igniter\Flame\Traits\EventEmitter;
 use Igniter\PayRegister\Traits\PaymentHelpers;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Session;
 use Joytekmotion\Paystack\Classes\PaystackApi;
 
 class Paystack extends BasePaymentGateway {
     use PaymentHelpers;
+    use EventEmitter;
+
+    protected $sessionKey = 'ti_joytekmotion_paystack';
 
     public function registerEntryPoints()
     {
@@ -16,7 +22,8 @@ class Paystack extends BasePaymentGateway {
             'paystack_initialize_transaction' => 'initializeTransaction',
             'paystack_process_transaction' => 'processTransaction',
             'paystack_payment_successful' => 'paymentSuccessful',
-            'paystack_webhook' => 'processWebhookUrl'
+            'paystack_webhook' => 'processWebhookUrl',
+            'paystack_cancel_url' => 'paymentCancelled'
         ];
     }
 
@@ -31,53 +38,143 @@ class Paystack extends BasePaymentGateway {
         $controller->addJs('$/joytekmotion/paystack/assets/js/process.paystack.js', 'process-paystack-js');
     }
 
-    public function initializeTransaction() {
-        $order = OrderManager::instance()->getOrder();
+    public function initializeTransaction($order) {
+        if (!($order instanceof \Admin\Models\Orders_model)) {
+            $order = OrderManager::instance()->getOrder();
+        }
+
+        Session::forget($this->sessionKey.'.create_payment_profile');
+
+        if(post('create_payment_profile')) {
+            Session::put($this->sessionKey.'.create_payment_profile', true);
+        }
+
         try {
-            $response = $this->createGateway()->initializeTransaction([
+            $metadata = $this->getMetadata($order);
+            $metadata['cancel_action'] = $this->makeEntryPointUrl('paystack_cancel_url').'/'.$order->hash;
+            $data = [
                 'email' => $order->email,
-                'amount' => $order->order_total * 100,
+                'amount' => (int)($order->order_total * 100),
                 'currency' => currency()->getUserCurrency(),
-                'metadata' => json_encode([
-                    'custom_fields' => [
-                        [
-                            'display_name' => 'Invoice ID',
-                            'variable_name' => 'invoice_id',
-                            'value' => $order->order_id,
-                        ],
-                        [
-                            'display_name' => 'Customer Name',
-                            'variable_name' => 'customer_name',
-                            'value' => $order->first_name .' '. $order->last_name,
-                        ],
-                        [
-                            'display_name' => 'Customer Email',
-                            'variable_name' => 'customer_email',
-                            'value' => $order->email,
-                        ],
-                        [
-                            'display_name' => 'Customer Phone',
-                            'variable_name' => 'customer_phone',
-                            'value' => $order->telephone,
-                        ],
-                        [
-                            'display_name' => 'Order Hash',
-                            'variable_name' => 'order_hash',
-                            'value' => $order->hash,
-                        ]
-                    ]
-                ]),
-            ]);
-            $response['data']['order_hash'] = $order->hash;
-            return $response['data'];
+                'metadata' => json_encode($metadata),
+            ];
+
+            if ($this->getIntegrationType() == 'redirect')
+                $data['callback_url'] = $this->makeEntryPointUrl('paystack_payment_successful').'/'.$order->hash;
+
+            $response = $this->createGateway()->initializeTransaction($data);
+            return $response['data'] ?? [];
         } catch (\Exception $ex) {
             throw new ApplicationException($ex->getMessage());
         }
     }
 
+    protected function getCustomFields($order) {
+        $customFields = [
+            [
+                'display_name' => 'Invoice ID',
+                'variable_name' => 'invoice_id',
+                'value' => $order->order_id,
+            ],
+            [
+                'display_name' => 'Customer Name',
+                'variable_name' => 'customer_name',
+                'value' => $order->first_name .' '. $order->last_name,
+            ],
+            [
+                'display_name' => 'Customer Email',
+                'variable_name' => 'customer_email',
+                'value' => $order->email,
+            ],
+            [
+                'display_name' => 'Customer Phone',
+                'variable_name' => 'customer_phone',
+                'value' => $order->telephone,
+            ],
+            [
+                'display_name' => 'Order Hash',
+                'variable_name' => 'order_hash',
+                'value' => $order->hash,
+            ],
+        ];
+
+        $eventResult = $this->fireSystemEvent('joytekmotion.paystack.extendCustomFields',
+            [$customFields, $order], false);
+
+        if (is_array($eventResult))
+            $customFields = array_merge($customFields, ...$eventResult);
+
+        return $customFields;
+    }
+
+    protected function getMetadata($order) {
+        $metadata = [
+            'custom_fields' => $this->getCustomFields($order),
+        ];
+
+        $eventResult = $this->fireSystemEvent('joytekmotion.paystack.extendMetadata',
+            [$metadata, $order], false);
+
+        if (is_array($eventResult))
+            $metadata = array_merge($metadata, ...$eventResult);
+
+        return $metadata;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function payFromPaymentProfile($order, $data = [])
+    {
+        $profile = $this->model->findPaymentProfile($order->customer);
+        if(!$profile || !array_has($profile->profile_data, 'authorization_code'))
+            throw new ApplicationException(
+                lang('joytekmotion.paystack::default.alert_payment_profile_not_found')
+            );
+
+        $metadata = $this->getMetadata($order);
+        $metadata['cancel_action'] = $this->makeEntryPointUrl('paystack_cancel_url').'/'.$order->hash;
+
+        $data = [
+            'email' => $order->email,
+            'amount' => (int)($order->order_total * 100),
+            'currency' => currency()->getUserCurrency(),
+            'authorization_code' => $profile->profile_data['authorization_code'],
+            'metadata' => json_encode($metadata),
+        ];
+
+        try {
+            $response = $this->createGateway()->chargeAuthorization($data);
+
+            if(array_get($response, 'data.paused'))
+                return Redirect::to(array_get($response, 'data.authorization_url'));
+
+            if(array_get($response, 'data.status') != 'success')
+                throw new ApplicationException(array_get($response, 'message'));
+
+            $order->logPaymentAttempt(
+                lang('joytekmotion.paystack::default.alert_payment_successful'),
+                1, $data, $response, true
+            );
+            $order->updateOrderStatus($this->model->order_status, ['notify' => FALSE]);
+            $order->markAsPaymentProcessed();
+        } catch(\Exception $ex) {
+            $order->logPaymentAttempt(lang('joytekmotion.paystack::default.alert_payment_error', [
+                'message' => $ex->getMessage()
+            ]), 0, $data, $response ?? []);
+            throw new ApplicationException($ex->getMessage());
+        }
+    }
+
+    public function deletePaymentProfile($customer, $profile) { }
+
+    /**
+     * @throws ApplicationException
+     */
     public function processWebhookUrl() {
-        if (post('event') != 'charge.success')
-            return;
+        $this->validateWebhookRequest();
+
+        if (post('event') != 'charge.success') return;
 
         $orderHash = null;
         foreach(post('data')['metadata']['custom_fields'] as $field) {
@@ -86,6 +183,7 @@ class Paystack extends BasePaymentGateway {
                 break;
             }
         }
+
         if (!$orderHash) return;
 
         $order = $this->createOrderModel()->whereHash($orderHash)->first();
@@ -93,24 +191,73 @@ class Paystack extends BasePaymentGateway {
 
         if($order->isPaymentProcessed()) return;
 
+        if(post('data.amount') != (int) ($order->order_total * 100)) return;
 
-
-
+        if((post('data.status') == 'success')) {
+            $order->updateOrderStatus($this->model->order_status, ['notify' => FALSE]);
+            $order->markAsPaymentProcessed();
+            $order->logPaymentAttempt(
+                lang('joytekmotion.paystack::default.alert_payment_successful'),
+                1, post(), post('data'), true
+            );
+        } else {
+            $order->logPaymentAttempt(post('data.message'), 0, post(), post('data'));
+        }
     }
 
-    public function paymentSuccessful($params) {
+    protected function validateWebhookRequest() {
+        $ipWhitelist = ['52.31.139.75', '52.49.173.169', '52.49.173.169'];
 
-        $hash = $params[0] ?? null;
-        $order = $this->createOrderModel()->whereHash($hash)->first();
+        if (!in_array(request()->ip(), $ipWhitelist))
+            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_invalid_request', [
+                'message' => 'IP not whitelisted'
+            ]));
+
+        $requestMethod = request()->getMethod();
+        $signature = request()->header('x-paystack-signature');
+
+        if (strtoupper($requestMethod) != 'POST' || !$signature)
+            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_invalid_request', [
+                'message' => 'Invalid request method or signature'
+            ]));
+
+        $input = request()->getContent();
+        $secretKey = $this->getSecretKey();
+
+        if($signature !== hash_hmac('sha512', $input, $secretKey))
+            throw new ApplicationException(lang('joytekmotion.paystack::default.alert_invalid_request', [
+                'message' => 'Invalid signature'
+            ]));
+    }
+
+    public function paymentSuccessful() {
+        $order = OrderManager::instance()->getOrder();
         try {
             if (!$order)
                 throw new \Exception(lang('joytekmotion.paystack::default.alert_transaction_failed'));
 
-            if (!$order->isPaymentProcessed() && (post('status') == 'success')) {
+            if (!$order->isPaymentProcessed()) {
                 $response = $this->createGateway()->verifyTransaction(post('reference'));
-                if (($response['data']['status'] == 'success') &&
-                    ($response['data']['amount'] == $order->order_total * 100)
-                ) {
+
+                $orderHash = null;
+                $customFields = array_get($response, 'data.metadata.custom_fields');
+                if (is_array($customFields)) {
+                    foreach($customFields as $field) {
+                        if ($field['variable_name'] == 'order_hash') {
+                            $orderHash = $field['value'];
+                            break;
+                        }
+                    }
+                }
+
+                if($orderHash != $order->hash)
+                    throw new \Exception(lang('joytekmotion.paystack::default.alert_order_hash_mismatch'));
+
+                if(array_get($response, 'data.amount') != (int) ($order->order_total * 100))
+                    throw new \Exception(lang('joytekmotion.paystack::default.alert_amount_mismatch'));
+
+                if (array_get($response, 'data.status') == 'success')
+                {
                     $order->updateOrderStatus($this->model->order_status, ['notify' => FALSE]);
                     $order->markAsPaymentProcessed();
                     $order->logPaymentAttempt(
@@ -118,14 +265,54 @@ class Paystack extends BasePaymentGateway {
                         1, post(), $response, true
                     );
                 }
+
+                $createPaymentProfile = Session::get($this->sessionKey.'.create_payment_profile');
+
+                if($createPaymentProfile && array_get($response, 'data.authorization.reusable')) {
+                    $this->updatePaymentProfile($order->customer, array_get($response, 'data.authorization'));
+                }
+                Session::forget($this->sessionKey.'.create_payment_profile');
+
+                if($this->getIntegrationType() == 'redirect')
+                    return Redirect::to(page_url('checkout'.DIRECTORY_SEPARATOR.'checkout'));
             }
 
         } catch(\Exception $ex) {
-            flash()->warning($ex->getMessage())->important()->now();
+            $order->logPaymentAttempt($ex->getMessage(), 0, post(), $response ?? []);
+            flash()->warning(lang('joytekmotion.paystack::default.alert_transaction_failed'))
+                ->important()->now();
         }
     }
 
-    public function paymentFailed($params) {
+    public function updatePaymentProfile($customer, $data)
+    {
+        return $this->handleUpdatePaymentProfile($customer, $data);
+    }
+
+    protected function handleUpdatePaymentProfile($customer, $data) {
+        $profile = $this->model->findPaymentProfile($customer);
+        $profileData = $profile ? (array)$profile->profile_data : $data;
+
+        if (!$profile)
+            $profile = $this->model->initPaymentProfile($customer);
+
+        $profile->card_brand = strtolower(array_get($profileData, 'card_type'));
+        $profile->card_last4 = array_get($profileData, 'last4');
+        $profile->setProfileData($profileData);
+
+        return $profile;
+    }
+
+    protected function updatePaymentProfileData($profile, $profileData = [], $cardData = [])
+    {
+        $profile->card_brand = strtolower(array_get($cardData, 'card.brand'));
+        $profile->card_last4 = array_get($cardData, 'card.last4');
+        $profile->setProfileData($profileData);
+
+        return $profile;
+    }
+
+    public function paymentCancelled($params) {
         $hash = $params[0] ?? null;
         $order = $this->createOrderModel()->whereHash($hash)->first();
         try {
@@ -145,153 +332,34 @@ class Paystack extends BasePaymentGateway {
         return $this->model->transaction_mode != 'live';
     }
 
-    public function getAuth($order) {
-        try {
-            return $this->createGateway()->auth([
-                'client_id' => $this->getClientId(),
-                'client_secret' => $this->getClientSecret(),
-                'terminal' => $this->getTerminalId(),
-                'invoiceId' => $order->order_id,
-                'amount' => $order->order_total,
-                'currency' => currency()->getUserCurrency()
-            ]);
-        } catch (\Exception $ex) {
-            flash()->warning($ex->getMessage())->important()->now();
-            throw new ApplicationException($ex->getMessage());
-        }
-    }
-
     protected function getSecretKey() {
         return $this->isTestMode() ? $this->model->test_secret_key : $this->model->live_secret_key;
     }
 
-    protected function getTransactionType() {
-        return $this->model->transaction_type ?? 'SALE';
+    public function getIntegrationType() {
+        return $this->model->integration_type ?? 'popup';
     }
 
-    public function processPaymentResponse() {
-        $order = $this->createOrderModel()->find(post('invoiceId'));
+    public function processPaymentForm($data, $host, $order) {
+        $this->validatePaymentMethod($order, $host);
+
+        if ($this->getIntegrationType() == 'popup')
+            return;
+
         try {
-            if ($order && post('success')) {
-                if (!$order->isPaymentProcessed()) {
-                    $order->updateOrderStatus($this->model->order_status, ['notify' => FALSE]);
-                    $order->markAsPaymentProcessed();
-                    // save card
-                    if (post('storeCardOnFile')) {
-                        $this->handleUpdatePaymentProfile($order->customer, [
-                            'merchantTokenId' => post('cardTokenId'),
-                            'cardName' => post('cardholderName') .' - '. post('cardSchemeName'),
-                            'panStar' => post('cardPanStarred'),
-                            'expiryDate' => post('cardExpiryDate'),
-                            'cardSchemeId' => post('cardSchemeId'),
-                            'cardholderName' => post('cardholderName'),
-                            'cardSchemeName' => post('cardSchemeName'),
-                            'cardIssuingCountry' => post('cardIssuingCountry'),
-                        ]);
-                    }
-                }
+            $response = $this->initializeTransaction($order);
+            if (!array_has($response, 'authorization_url'))
+                throw new ApplicationException(lang('joytekmotion.paystack::default.alert_transaction_failed'));
 
-                if (post('settled')) {
-                    $order->logPaymentAttempt(
-                        lang('joytekmotion.paystack::default.alert_payment_successful'), 1, [], post(), true);
-                } else {
-                    $order->logPaymentAttempt(
-                        lang('joytekmotion.paystack::default.alert_payment_authorized'), 1, [], post());
-                }
-            } else {
-                $message = post('message') ?? lang('joytekmotion.paystack::default.alert_transaction_failed');
-                throw new \Exception($message);
-            }
+            return Redirect::to(array_get($response, 'authorization_url'));
         } catch (\Exception $ex) {
-            if ($order)
-                $order->logPaymentAttempt($ex->getMessage(), 0, [], post());
-        }
-    }
-
-    public function getPaymentProfiles($customer) {
-        if (!$customer)
-            return [];
-        if ($this->paymentProfiles !== null)
-            return $this->paymentProfiles;
-        return $this->paymentProfiles = Payment_profiles_model::where('customer_id', $customer->customer_id)
-            ->where('payment_id', $this->model->payment_id)->get();
-    }
-
-    protected function cardExists($customer, $cardTokenId) {
-        return Payment_profiles_model::where('customer_id', $customer->customer_id)
-            ->where('payment_id', $this->model->payment_id)
-            ->where('profile_data->merchantTokenId', $cardTokenId)->exists();
-    }
-
-    public function processDeletePaymentProfile($params)
-    {
-        if (isset($params[0])) {
-            $profile = Payment_profiles_model::where('customer_id', Auth::getUser()->customer_id)
-                ->where('payment_profile_id', $params[0])
-                ->first();
-
-            if ($profile) {
-                return $profile->delete();
-            }
-        }
-    }
-
-    /**
-     * Settle an authorized payment
-     * @param string $transactionId
-     * @param Orders_model $order
-     * @return bool
-     *
-     * @throws ApplicationException
-     */
-    public function settleAuthPayment($transactionId, $order) {
-        try {
-            $result = $this->createGateway()->charge([
-                'client_id' => $this->getClientId(),
-                'client_secret' => $this->getClientSecret(),
-                'terminal' => $this->getTerminalId(),
-                'invoiceId' => $order->order_id,
-                'amount' => $order->order_total,
-                'currency' => currency()->getUserCurrency(),
-                'transaction_id' => $transactionId
-            ]);
-            if( !empty($result) && $result['success'] ) {
-                $order->logPaymentAttempt(lang('joytekmotion.paystack::default.alert_payment_successful'), 1, [], $result, true);
-                return true;
-            }
-        } catch (\Exception $ex) {
+            $order->logPaymentAttempt(
+                lang('joytekmotion.paystack::default.alert_payment_error', [
+                    'message' => $ex->getMessage()
+                ]), 0, [], post()
+            );
             throw new ApplicationException($ex->getMessage());
         }
-        return false;
-    }
-
-    /**
-     * Cancel an authorized payment
-     * @param $transactionId
-     * @param $order
-     * @return bool
-     * @throws ApplicationException
-     */
-    public function cancelAuthPayment($transactionId, $order)
-    {
-        try {
-            $result = $this->createGateway()->cancel([
-                'client_id' => $this->getClientId(),
-                'client_secret' => $this->getClientSecret(),
-                'terminal' => $this->getTerminalId(),
-                'invoiceId' => $order->order_id,
-                'amount' => $order->order_total,
-                'currency' => currency()->getUserCurrency(),
-                'transaction_id' => $transactionId
-            ]);
-            if( !empty($result) && $result['success'] ) {
-                $order->logPaymentAttempt(lang('joytekmotion.paystack::default.alert_payment_cancelled'), 1, [], $result);
-                return true;
-            }
-        } catch (\Exception $ex) {
-            $order->logPaymentAttempt(lang('joytekmotion.paystack::default.alert_payment_error', ['message' => $ex->getMessage()]), 0, [], $result);
-        }
-        return false;
     }
 
     public function processRefundForm($data, $order, $paymentLog)
@@ -300,13 +368,10 @@ class Paystack extends BasePaymentGateway {
         if (!is_null($paymentLog->refunded_at) || !is_array($paymentResponse))
             throw new ApplicationException(lang('joytekmotion.paystack::default.alert_refund_nothing_to_refund'));
 
-        if (!(
-                (array_get($paymentResponse, 'success') && array_get($paymentResponse, 'settled')) ||
-                (array_get($paymentResponse, 'transactionState') == 'CHARGE')
-            ))
+        if (array_get($paymentResponse, 'data.status') != 'success')
             throw new ApplicationException(lang('joytekmotion.paystack::default.alert_payment_not_settled'));
 
-        $transactionId = array_get($paymentLog->response, 'id');
+        $transactionId = array_get($paymentLog->response, 'data.reference');
 
         $refundAmount = array_get($data, 'refund_type') == 'full' ? $order->order_total :
             array_get($data, 'refund_amount');
@@ -314,30 +379,28 @@ class Paystack extends BasePaymentGateway {
         if ($refundAmount > $order->order_total)
             throw new ApplicationException(lang('joytekmotion.paystack::default.alert_refund_amount_should_be_less'));
 
-        $result = [];
+        $response = [];
         try {
-            $result = $this->createGateway()->refund([
-                'client_id' => $this->getClientId(),
-                'client_secret' => $this->getClientSecret(),
-                'terminal' => $this->getTerminalId(),
-                'invoiceId' => $order->order_id,
-                'amount' => $refundAmount,
-                'currency' => currency()->getUserCurrency(),
-                'transaction_id' => $transactionId
-            ]);
-            if( !empty($result) && $result['success'] ) {
+            $response = $this->createGateway()->createRefund($transactionId, (int)($refundAmount * 100));
+            $status = array_get($response, 'status');
+            if($status == 'success' || $status == 'pending') {
                 $paymentLog->markAsRefundProcessed();
-                $order->logPaymentAttempt(
-                    lang('joytekmotion.paystack::default.alert_payment_refunded', [
-                        'transactionId' => $transactionId,
-                        'amount' => currency_format($refundAmount)
-                    ]), 1, [], $result);
+                $order->logPaymentAttempt(array_get($response, 'message'), 1, [], $response);
                 return true;
             }
         } catch (\Exception $ex) {
             $order->logPaymentAttempt(lang('joytekmotion.paystack::default.alert_refund_failed',
-                ['message' => $ex->getMessage()]), 0, [], $result);
+                ['message' => $ex->getMessage()]), 0, [], $response);
         }
+    }
 
+    public function isCardIconSupported($cardType) {
+        $cards = ['visa', 'mastercard', 'paypal', 'amex', 'discover', 'diners-club', 'jcb', 'stripe'];
+        return array_has($cards, $cardType);
+    }
+
+    public function supportsPaymentProfiles()
+    {
+        return true;
     }
 }
